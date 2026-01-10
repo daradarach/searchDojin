@@ -21,11 +21,11 @@ except Exception:
 def _safe_console_str(s):
     """Return a string that's safe to print to the current console encoding.
 
-    - If s is None, returns '(なし)'.
+    - If s is None, returns '' (empty string).
     - Tries to encode with sys.stdout.encoding; on failure replaces unencodable chars.
     """
     if s is None:
-        return '(なし)'
+        return ''
     try:
         enc = sys.stdout.encoding or 'utf-8'
         # if this succeeds, string is printable as-is
@@ -97,7 +97,7 @@ def _find_booth_url_with_fallback(title, circle, author):
         url = get_first_search_url_from_booth(q)
         if url and isinstance(url, str) and url.startswith('http'):
             return url
-    return "N/A"
+    return None
 
 
 def _fetch_site_info(site_name, url):
@@ -186,11 +186,11 @@ if __name__ == "__main__":
             # Normalize release date to YYYY/MM/DD when possible
             release_norm = _normalize_date_to_ymd(release)
 
-            dlsiteurl = site_urls.get('dlsite') or 'N/A'
+            dlsiteurl = site_urls.get('dlsite') or ''
             fanza = ''
-            boothurl = site_urls.get('booth') or 'N/A'
-            toraurl = site_urls.get('toranoana') or 'N/A'
-            melonurl = site_urls.get('melonbooks') or 'N/A'
+            boothurl = site_urls.get('booth') or ''
+            toraurl = site_urls.get('toranoana') or ''
+            melonurl = site_urls.get('melonbooks') or ''
 
             # Print with safe encoding
             print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}\t{cleaned}")
@@ -237,7 +237,7 @@ if __name__ == "__main__":
                     if not results:
                         print(f"Warning: no search result for query: {_safe_console_str(value)}", file=sys.stderr)
                         # エラー時も空行を出力する
-                        print(f"\t\t{_safe_console_str(value)}\t\t\t\t\t{None}")
+                        print(f"\t\t{_safe_console_str(value)}\t\t\t\t\t")
                         continue
                     else:
                         # Prefer a primary source for extraction: dlsite > booth > melonbooks > toranoana
@@ -322,11 +322,11 @@ if __name__ == "__main__":
                     # Normalize release date to YYYY/MM/DD when possible
                     release_norm = _normalize_date_to_ymd(release)
 
-                    dlsiteurl = site_urls.get('dlsite') or 'N/A'
+                    dlsiteurl = site_urls.get('dlsite') or ''
                     fanza = site_urls.get('fanza') or ''
-                    boothurl = site_urls.get('booth') or 'N/A'
-                    toraurl = site_urls.get('toranoana') or 'N/A'
-                    melonurl = site_urls.get('melonbooks') or 'N/A'
+                    boothurl = site_urls.get('booth') or ''
+                    toraurl = site_urls.get('toranoana') or ''
+                    melonurl = site_urls.get('melonbooks') or ''
 
                     print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}")
 
