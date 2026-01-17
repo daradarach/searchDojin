@@ -368,3 +368,47 @@ def get_first_search_url_from_fanza(query):
         return "N/A"
     except Exception:
         return "N/A"
+
+
+def get_first_search_url_from_alicebooks(query):
+    """
+    AliceBooks (alice-books.com) で指定のクエリを検索し、最初の結果のURLを返す。
+    """
+    # クエリをURLエンコード
+    encoded_query = urllib.parse.quote(query)
+    
+    # 検索URLを構築
+    search_url = f"https://alice-books.com/item/list/all?keyword={encoded_query}&on_sale=1"
+    
+    # ヘッダーを設定（ボット検知回避）
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    try:
+        # 検索ページを取得
+        response = requests.get(search_url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        # HTMLを解析
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 最初の商品リンクを探す
+        # Alice Books の商品リンク形式: /item/show/XXXX-YY
+        first_link_elem = soup.find('a', href=re.compile(r'/item/show/\d+'))
+        
+        if first_link_elem and first_link_elem.get('href'):
+            href = first_link_elem['href']
+            # 相対URLの場合、ベースURLを追加
+            if href.startswith('/'):
+                full_url = f"https://alice-books.com{href}"
+            else:
+                full_url = href
+            return full_url
+        else:
+            return "N/A"
+    
+    except requests.RequestException as e:
+        return "N/A"
+    except Exception as e:
+        return "N/A"

@@ -3,10 +3,11 @@ import os
 import re
 from melon import clean_url, extract_product_info as extract_product_info_melon
 from tora import extract_product_info as extract_product_info_tora
-from google import get_first_search_url_from_booth, get_first_search_url_from_dlsite, get_first_search_url_from_toranoana, get_first_search_url_from_melonbooks, get_first_search_url_from_fanza
+from google import get_first_search_url_from_booth, get_first_search_url_from_dlsite, get_first_search_url_from_toranoana, get_first_search_url_from_melonbooks, get_first_search_url_from_fanza, get_first_search_url_from_alicebooks
 from dlsite import extract_product_info as extract_product_info_dlsite
 from booth import extract_product_info as extract_product_info_booth
 from fanza import extract_product_info as extract_product_info_fanza
+from alicebooks import extract_product_info as extract_product_info_alicebooks
 
 # Prefer python output to use UTF-8 and replace unencodable chars to avoid crashes when capturing output on Windows
 os.environ.setdefault('PYTHONIOENCODING', 'utf-8:replace')
@@ -115,6 +116,8 @@ def _fetch_site_info(site_name, url):
             return extract_product_info_booth(url)
         elif site_name == 'fanza':
             return extract_product_info_fanza(url)
+        elif site_name == 'alicebooks':
+            return extract_product_info_alicebooks(url)
         else:
             return None
     except Exception:
@@ -137,6 +140,8 @@ def execute_url(url):
         info = extract_product_info_dlsite(cleaned_url)
     elif 'booth' in url or 'booth.pm' in url:
         info = extract_product_info_booth(cleaned_url)
+    elif 'alice-books' in url or 'alice-books.com' in url:
+        info = extract_product_info_alicebooks(cleaned_url)
     # Defensive: if info is not set, it means the URL was unsupported or invalid
     if not info:
         raise ValueError(f"Unsupported or invalid URL: {url}")
@@ -161,14 +166,15 @@ if __name__ == "__main__":
                 'melonbooks': get_first_search_url_from_melonbooks(title_q),
                 'toranoana': get_first_search_url_from_toranoana(title_q),
                 'booth': _find_booth_url_with_fallback(title_q, info.get('サークル名'), info.get('作家名')),
-                'fanza': get_first_search_url_from_fanza(title_q)
+                'fanza': get_first_search_url_from_fanza(title_q),
+                'alicebooks': get_first_search_url_from_alicebooks(title_q)
             }
 
             # Fetch metadata from available sites
             site_infos = {k: _fetch_site_info(k, u) for k, u in site_urls.items()}
 
-            # Priority for metadata: melonbooks > toranoana > dlsite = fanza > booth
-            pref = ['melonbooks', 'toranoana', 'dlsite', 'fanza', 'booth']
+            # Priority for metadata: melonbooks > toranoana > alicebooks > dlsite = fanza > booth
+            pref = ['melonbooks', 'toranoana', 'alicebooks', 'dlsite', 'fanza', 'booth']
             def pick(field):
                 for s in pref:
                     si = site_infos.get(s)
@@ -191,9 +197,10 @@ if __name__ == "__main__":
             boothurl = site_urls.get('booth') or ''
             toraurl = site_urls.get('toranoana') or ''
             melonurl = site_urls.get('melonbooks') or ''
+            alicebooksurl = site_urls.get('alicebooks') or ''
 
             # Print with safe encoding
-            print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}\t{cleaned}")
+            print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}\t{alicebooksurl}\t{cleaned}")
 
         except Exception as e:
             print(f"Error processing {_safe_console_str(file_path)}: {e}", file=sys.stderr)
@@ -216,6 +223,7 @@ if __name__ == "__main__":
                         ('toranoana', get_first_search_url_from_toranoana),
                         ('dlsite', get_first_search_url_from_dlsite),
                         ('booth', get_first_search_url_from_booth),
+                        ('alicebooks', get_first_search_url_from_alicebooks),
                     ]
                     results = {}
                     for name, fn in search_fns:
@@ -240,8 +248,8 @@ if __name__ == "__main__":
                         print(f"\t\t{_safe_console_str(value)}\t\t\t\t\t")
                         continue
                     else:
-                        # Prefer a primary source for extraction: dlsite > booth > melonbooks > toranoana
-                        preferred = ['dlsite', 'booth', 'melonbooks', 'toranoana']
+                        # Prefer a primary source for extraction: dlsite > booth > melonbooks > toranoana > alicebooks
+                        preferred = ['dlsite', 'booth', 'melonbooks', 'toranoana', 'alicebooks']
                         primary = None
                         for p in preferred:
                             if p in results:
@@ -292,20 +300,22 @@ if __name__ == "__main__":
                         site_urls['toranoana'] = results.get('toranoana')
                         site_urls['booth'] = results.get('booth')
                         site_urls['fanza'] = results.get('fanza')
+                        site_urls['alicebooks'] = results.get('alicebooks')
                     else:
                         # No initial search results; perform fresh site searches by title
                         site_urls['dlsite'] = get_first_search_url_from_dlsite(title_q)
                         site_urls['melonbooks'] = get_first_search_url_from_melonbooks(title_q)
                         site_urls['toranoana'] = get_first_search_url_from_toranoana(title_q)
                         site_urls['booth'] = _find_booth_url_with_fallback(title_q, info.get('サークル名'), info.get('作家名'))
+                        site_urls['alicebooks'] = get_first_search_url_from_alicebooks(title_q)
                         # Ensure FANZA slot exists even if empty
                         site_urls['fanza'] = None
 
                     # Fetch metadata from each available site
                     site_infos = {k: _fetch_site_info(k, u) for k, u in site_urls.items()}
 
-                    # Priority for metadata: melonbooks > toranoana > dlsite = fanza > booth
-                    pref = ['melonbooks', 'toranoana', 'dlsite', 'fanza', 'booth']
+                    # Priority for metadata: melonbooks > toranoana > alicebooks > dlsite = fanza > booth
+                    pref = ['melonbooks', 'toranoana', 'alicebooks', 'dlsite', 'fanza', 'booth']
                     def pick(field):
                         for s in pref:
                             si = site_infos.get(s)
@@ -327,8 +337,9 @@ if __name__ == "__main__":
                     boothurl = site_urls.get('booth') or ''
                     toraurl = site_urls.get('toranoana') or ''
                     melonurl = site_urls.get('melonbooks') or ''
+                    alicebooksurl = site_urls.get('alicebooks') or ''
 
-                    print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}")
+                    print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}\t{alicebooksurl}")
 
                 except Exception as e:
                     # Use safe string formatting for URLs or error messages that may contain unicode
