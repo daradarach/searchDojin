@@ -62,15 +62,23 @@ def extract_product_info(product_url):
 
     # 4) Extract author from the metadata table
     # Look for table rows with labels like "主な作家" (main author)
+    # Authors are in separate <div> or <a> elements within the cell
     try:
         for tr in soup.find_all('tr'):
-            th = tr.find('th')
-            td = tr.find('td')
-            if th and td:
-                label = th.get_text(strip=True)
-                value = td.get_text(strip=True)
+            cells = tr.find_all(['th', 'td'])
+            if len(cells) >= 2:
+                label = cells[0].get_text(strip=True)
                 if '作家' in label or '著者' in label:
-                    author = value
+                    author_cell = cells[1]
+                    # Find all author links or divs
+                    author_links = author_cell.find_all('a')
+                    if author_links:
+                        # Get text from each link and join with comma
+                        authors = [link.get_text(strip=True) for link in author_links]
+                        author = ', '.join(authors)
+                    else:
+                        # Fallback to full text if no links found
+                        author = author_cell.get_text(strip=True)
                     break
     except Exception:
         pass
@@ -79,11 +87,10 @@ def extract_product_info(product_url):
     # Look for rows with labels like "発行日" (release date)
     try:
         for tr in soup.find_all('tr'):
-            th = tr.find('th')
-            td = tr.find('td')
-            if th and td:
-                label = th.get_text(strip=True)
-                value = td.get_text(strip=True)
+            cells = tr.find_all(['th', 'td'])
+            if len(cells) >= 2:
+                label = cells[0].get_text(strip=True)
+                value = cells[1].get_text(strip=True)
                 if '発行日' in label or '発売日' in label:
                     release_date = value
                     break
