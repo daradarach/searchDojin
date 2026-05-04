@@ -333,11 +333,23 @@ if __name__ == "__main__":
                     release_norm = _normalize_date_to_ymd(release)
 
                     dlsiteurl = site_urls.get('dlsite') or ''
+                    if dlsiteurl == 'N/A':
+                        dlsiteurl = ''
                     fanza = site_urls.get('fanza') or ''
+                    if fanza == 'N/A':
+                        fanza = ''
                     boothurl = site_urls.get('booth') or ''
+                    if boothurl == 'N/A':
+                        boothurl = ''
                     toraurl = site_urls.get('toranoana') or ''
+                    if toraurl == 'N/A':
+                        toraurl = ''
                     melonurl = site_urls.get('melonbooks') or ''
+                    if melonurl == 'N/A':
+                        melonurl = ''
                     alicebooksurl = site_urls.get('alicebooks') or ''
+                    if alicebooksurl == 'N/A':
+                        alicebooksurl = ''
 
                     print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}\t{alicebooksurl}")
 
