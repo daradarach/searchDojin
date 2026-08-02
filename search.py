@@ -15,28 +15,21 @@ try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 except Exception:
-    # reconfigure may not be available or may fail in some environments; fallback to safe printing below
     pass
 
 
 def _safe_console_str(s):
-    """Return a string that's safe to print to the current console encoding.
-
-    - If s is None, returns '' (empty string).
-    - Tries to encode with sys.stdout.encoding; on failure replaces unencodable chars.
-    """
+    """Return a string that's safe to print to the current console encoding."""
     if s is None:
         return ''
     try:
         enc = sys.stdout.encoding or 'utf-8'
-        # if this succeeds, string is printable as-is
         s.encode(enc)
         return s
     except Exception:
         try:
             return s.encode(enc, errors='replace').decode(enc)
         except Exception:
-            # very last resort: replace non-ascii with '?'
             return ''.join([c if ord(c) < 128 else '?' for c in s])
 
 
@@ -51,17 +44,12 @@ def _to_ascii_digits(s):
 
 
 def _normalize_date_to_ymd(s):
-    """Normalize a date-like string to 'YYYY/MM/DD'.
-
-    - If only year/month present, day defaults to '01'.
-    - If unable to parse, returns original string.
-    """
+    """Normalize a date-like string to 'YYYY/MM/DD'."""
     if not s:
         return ''
     s2 = _to_ascii_digits(s)
     s2 = s2.strip()
 
-    # Common patterns: 2025年10月19日 | 2025-10-19 | 2025/10/19 | 2025.10.19
     m = re.search(r"(?P<y>\d{4})\D+?(?P<m>\d{1,2})\D+?(?P<d>\d{1,2})", s2)
     if m:
         y = m.group('y')
@@ -73,14 +61,12 @@ def _normalize_date_to_ymd(s):
         y = m2.group('y')
         mo = int(m2.group('m'))
         return f"{y}/{mo:02d}/01"
-    # fallback: try ISO-like 'YYYY-MM-DD'
     m3 = re.search(r"(?P<y>\d{4})-(?P<m>\d{1,2})-(?P<d>\d{1,2})", s2)
     if m3:
         y = m3.group('y')
         mo = int(m3.group('m'))
         d = int(m3.group('d'))
         return f"{y}/{mo:02d}/{d:02d}"
-    # could not parse -> return original
     return s
 
 
@@ -99,6 +85,84 @@ def _find_booth_url_with_fallback(title, circle, author):
         if url and isinstance(url, str) and url.startswith('http'):
             return url
     return None
+
+
+def _detect_site_from_url(url):
+    """Detect a supported site from a URL for direct-input handling."""
+    if not url or not isinstance(url, str):
+        return None
+    lowered = url.lower()
+    if 'melonbooks' in lowered:
+        return 'melonbooks'
+    if 'toranoana' in lowered:
+        return 'toranoana'
+    if 'dlsite' in lowered:
+        return 'dlsite'
+    if 'booth.pm' in lowered or 'booth' in lowered:
+        return 'booth'
+    if 'alice-books' in lowered:
+        return 'alicebooks'
+    if 'dmm.co.jp' in lowered or 'fanza' in lowered:
+        return 'fanza'
+    return None
+
+
+def _get_direct_url_output_value(site_name, original_url, cleaned_url):
+    """Return the value to place in the per-site URL column for a direct URL input."""
+    if site_name == 'melonbooks':
+        return cleaned_url or original_url
+    return original_url
+
+
+def _build_site_url_candidates(title_q, info, results=None, excluded_site=None):
+    """Build a site-url mapping from either search results or fresh title-based searches."""
+    site_urls = {'dlsite': '', 'melonbooks': '', 'toranoana': '', 'booth': '', 'fanza': '', 'alicebooks': ''}
+
+    if isinstance(results, dict) and results:
+        for key in site_urls:
+            site_urls[key] = results.get(key) or ''
+        return site_urls
+
+    def set_if_allowed(site_key, value):
+        if excluded_site and site_key == excluded_site:
+            return
+        if value:
+            site_urls[site_key] = value
+
+    if not excluded_site or excluded_site != 'dlsite':
+        set_if_allowed('dlsite', get_first_search_url_from_dlsite(title_q))
+    if not excluded_site or excluded_site != 'melonbooks':
+        set_if_allowed('melonbooks', get_first_search_url_from_melonbooks(title_q))
+    if not excluded_site or excluded_site != 'toranoana':
+        set_if_allowed('toranoana', get_first_search_url_from_toranoana(title_q))
+    if not excluded_site or excluded_site != 'booth':
+        set_if_allowed('booth', _find_booth_url_with_fallback(title_q, info.get('サークル名'), info.get('作家名')))
+    if not excluded_site or excluded_site != 'alicebooks':
+        set_if_allowed('alicebooks', get_first_search_url_from_alicebooks(title_q))
+    if not excluded_site or excluded_site != 'fanza':
+        site_urls['fanza'] = ''
+    return site_urls
+
+
+def _pick_metadata(site_infos, info, pref=None):
+    """Pick the best available metadata from a site-info mapping."""
+    if pref is None:
+        pref = ['melonbooks', 'toranoana', 'alicebooks', 'dlsite', 'fanza', 'booth']
+
+    def pick(field):
+        for s in pref:
+            si = site_infos.get(s)
+            if si and si.get(field):
+                return si.get(field)
+        return info.get(field)
+
+    return {
+        'サークル名': pick('サークル名'),
+        '作家名': pick('作家名'),
+        '作品名': pick('作品名'),
+        '発売日': pick('発売日'),
+        'イベント名': pick('イベント名'),
+    }
 
 
 def _fetch_site_info(site_name, url):
@@ -125,10 +189,7 @@ def _fetch_site_info(site_name, url):
 
 
 def execute_url(url):
-    """Fetch product metadata from a given product URL and return (info_dict, cleaned_url).
-
-    This no longer prints; callers should handle printing and cross-site aggregation.
-    """
+    """Fetch product metadata from a given product URL and return (info_dict, cleaned_url)."""
     cleaned_url = url
     info = None
     if 'melonbooks' in url:
@@ -142,66 +203,45 @@ def execute_url(url):
         info = extract_product_info_booth(cleaned_url)
     elif 'alice-books' in url or 'alice-books.com' in url:
         info = extract_product_info_alicebooks(cleaned_url)
-    # Defensive: if info is not set, it means the URL was unsupported or invalid
     if not info:
         raise ValueError(f"Unsupported or invalid URL: {url}")
     return info, cleaned_url
 
 
-if __name__ == "__main__":
-    if len(sys.argv) != 2:
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    if len(argv) != 1:
         print("Usage: python script.py <file_path or URL>", file=sys.stderr)
         sys.exit(1)
-    
-    file_path = sys.argv[1]
+
+    file_path = argv[0]
 
     if 'https://' in file_path:
-        # 直接URLが渡された場合
         try:
             info, cleaned = execute_url(file_path)
-            # Build search URLs for related sites based on extracted title
+            detected_site = _detect_site_from_url(file_path)
             title_q = info.get('作品名') or ''
-            site_urls = {
-                'dlsite': get_first_search_url_from_dlsite(title_q),
-                'melonbooks': get_first_search_url_from_melonbooks(title_q),
-                'toranoana': get_first_search_url_from_toranoana(title_q),
-                'booth': _find_booth_url_with_fallback(title_q, info.get('サークル名'), info.get('作家名')),
-                'fanza': get_first_search_url_from_fanza(title_q),
-                'alicebooks': get_first_search_url_from_alicebooks(title_q)
-            }
+            site_urls = _build_site_url_candidates(title_q, info, results=None, excluded_site=detected_site)
+            if detected_site:
+                site_urls[detected_site] = _get_direct_url_output_value(detected_site, file_path, cleaned)
 
-            # Fetch metadata from available sites
-            site_infos = {k: _fetch_site_info(k, u) for k, u in site_urls.items()}
-
-            # Priority for metadata: melonbooks > toranoana > alicebooks > dlsite = fanza > booth
-            pref = ['melonbooks', 'toranoana', 'alicebooks', 'dlsite', 'fanza', 'booth']
-            def pick(field):
-                for s in pref:
-                    si = site_infos.get(s)
-                    if si and si.get(field):
-                        return si.get(field)
-                # fallback to primary info
-                return info.get(field)
-
-            circle = pick('サークル名')
-            author = pick('作家名')
-            title = pick('作品名')
-            release = pick('発売日')
-            event = pick('イベント名')
-
-            # Normalize release date to YYYY/MM/DD when possible
+            site_infos = {k: _fetch_site_info(k, u) for k, u in site_urls.items() if u}
+            picked = _pick_metadata(site_infos, info)
+            circle = picked['サークル名'] or info.get('サークル名') or ''
+            author = picked['作家名'] or info.get('作家名') or ''
+            title = picked['作品名'] or info.get('作品名') or ''
+            release = picked['発売日'] or info.get('発売日') or ''
+            event = picked['イベント名'] or info.get('イベント名') or ''
             release_norm = _normalize_date_to_ymd(release)
 
             dlsiteurl = site_urls.get('dlsite') or ''
-            fanza = ''
+            fanza = site_urls.get('fanza') or ''
             boothurl = site_urls.get('booth') or ''
             toraurl = site_urls.get('toranoana') or ''
             melonurl = site_urls.get('melonbooks') or ''
             alicebooksurl = site_urls.get('alicebooks') or ''
-
-            # Print with safe encoding
             print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}\t{alicebooksurl}\t{cleaned}")
-
         except Exception as e:
             print(f"Error processing {_safe_console_str(file_path)}: {e}", file=sys.stderr)
             sys.exit(1)
@@ -213,11 +253,11 @@ if __name__ == "__main__":
                 value = line.strip()
                 if not value:
                     continue
-                # If the line looks like a URL, process it directly
+                detected_site = None
                 if value.startswith('http'):
                     target_url = value
+                    detected_site = _detect_site_from_url(value)
                 else:
-                    # Treat as a search query (fallback): try multiple search helpers and collect all candidate URLs
                     search_fns = [
                         ('melonbooks', get_first_search_url_from_melonbooks),
                         ('toranoana', get_first_search_url_from_toranoana),
@@ -234,7 +274,6 @@ if __name__ == "__main__":
                         if candidate and isinstance(candidate, str) and candidate.startswith('http'):
                             results[name] = candidate
 
-                    # If no candidate links found yet, try FANZA as a last resort before giving up
                     if not results:
                         try:
                             fz = get_first_search_url_from_fanza(value)
@@ -244,11 +283,9 @@ if __name__ == "__main__":
                             pass
                     if not results:
                         print(f"Warning: no search result for query: {_safe_console_str(value)}", file=sys.stderr)
-                        # エラー時も空行を出力する
-                        print(f"\t\t{_safe_console_str(value)}\t\t\t\t\t")
+                        print(f"\t\t{_safe_console_str(value)}\t\t\t\t")
                         continue
                     else:
-                        # Prefer a primary source for extraction: dlsite > booth > melonbooks > toranoana > alicebooks
                         preferred = ['dlsite', 'booth', 'melonbooks', 'toranoana', 'alicebooks']
                         primary = None
                         for p in preferred:
@@ -256,30 +293,16 @@ if __name__ == "__main__":
                                 primary = results[p]
                                 primary_name = p
                                 break
-                        # Ensure we also record fanza if present in results
-                        if 'fanza' in results:
-                            # already present
-                            pass
-                        else:
-                            # try to populate fanza as well using query
-                            try:
-                                fz = get_first_search_url_from_fanza(value)
-                                if fz and isinstance(fz, str) and fz.startswith('http'):
-                                    results['fanza'] = fz
-                            except Exception:
-                                pass
-                        # fallback to any found
                         if primary is None:
                             primary_name, primary = next(iter(results.items()))
 
-                        # Log all found candidate URLs
                         found_list = ', '.join([f"{k}:{v}" for k, v in results.items()])
                         print(f"Found URLs for query: {_safe_console_str(value)} -> {found_list}", file=sys.stderr)
 
                         target_url = primary
                         found_source = primary_name
+
                 try:
-                    # If the chosen primary source is FANZA, use the dedicated extractor
                     if 'found_source' in locals() and found_source == 'fanza':
                         try:
                             info = extract_product_info_fanza(target_url)
@@ -289,47 +312,18 @@ if __name__ == "__main__":
                     else:
                         info, cleaned = execute_url(target_url)
 
-                    # Build site_urls mapping: prefer previously discovered `results` (if present), otherwise search by title
                     title_q = info.get('作品名') or ''
-                    site_urls = {}
-                    # If we started from a raw query and found some candidate URLs, only use those sites' URLs.
-                    # Do NOT try to re-query other sites based on the title (this avoids spurious matches).
-                    if 'results' in locals() and isinstance(results, dict) and results:
-                        site_urls['dlsite'] = results.get('dlsite')
-                        site_urls['melonbooks'] = results.get('melonbooks')
-                        site_urls['toranoana'] = results.get('toranoana')
-                        site_urls['booth'] = results.get('booth')
-                        site_urls['fanza'] = results.get('fanza')
-                        site_urls['alicebooks'] = results.get('alicebooks')
-                    else:
-                        # No initial search results; perform fresh site searches by title
-                        site_urls['dlsite'] = get_first_search_url_from_dlsite(title_q)
-                        site_urls['melonbooks'] = get_first_search_url_from_melonbooks(title_q)
-                        site_urls['toranoana'] = get_first_search_url_from_toranoana(title_q)
-                        site_urls['booth'] = _find_booth_url_with_fallback(title_q, info.get('サークル名'), info.get('作家名'))
-                        site_urls['alicebooks'] = get_first_search_url_from_alicebooks(title_q)
-                        # Ensure FANZA slot exists even if empty
-                        site_urls['fanza'] = None
+                    site_urls = _build_site_url_candidates(title_q, info, results=results if 'results' in locals() else None, excluded_site=detected_site)
+                    if detected_site:
+                        site_urls[detected_site] = _get_direct_url_output_value(detected_site, target_url, cleaned)
 
-                    # Fetch metadata from each available site
-                    site_infos = {k: _fetch_site_info(k, u) for k, u in site_urls.items()}
-
-                    # Priority for metadata: melonbooks > toranoana > alicebooks > dlsite = fanza > booth
-                    pref = ['melonbooks', 'toranoana', 'alicebooks', 'dlsite', 'fanza', 'booth']
-                    def pick(field):
-                        for s in pref:
-                            si = site_infos.get(s)
-                            if si and si.get(field):
-                                return si.get(field)
-                        return info.get(field)
-
-                    circle = pick('サークル名')
-                    author = pick('作家名')
-                    title = pick('作品名')
-                    release = pick('発売日')
-                    event = pick('イベント名')
-
-                    # Normalize release date to YYYY/MM/DD when possible
+                    site_infos = {k: _fetch_site_info(k, u) for k, u in site_urls.items() if u}
+                    picked = _pick_metadata(site_infos, info)
+                    circle = picked['サークル名'] or info.get('サークル名') or ''
+                    author = picked['作家名'] or info.get('作家名') or ''
+                    title = picked['作品名'] or info.get('作品名') or ''
+                    release = picked['発売日'] or info.get('発売日') or ''
+                    event = picked['イベント名'] or info.get('イベント名') or ''
                     release_norm = _normalize_date_to_ymd(release)
 
                     dlsiteurl = site_urls.get('dlsite') or ''
@@ -339,10 +333,9 @@ if __name__ == "__main__":
                     melonurl = site_urls.get('melonbooks') or ''
                     alicebooksurl = site_urls.get('alicebooks') or ''
 
-                    print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}\t{alicebooksurl}")
+                    print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}\t{alicebooksurl}\t{cleaned}")
 
                 except Exception as e:
-                    # Use safe string formatting for URLs or error messages that may contain unicode
                     print(f"Error processing {_safe_console_str(target_url)}: {e}", file=sys.stderr)
     except FileNotFoundError:
         print(f"File not found: {file_path}", file=sys.stderr)
@@ -350,3 +343,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error reading file: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
