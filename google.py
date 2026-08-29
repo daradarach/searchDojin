@@ -6,6 +6,7 @@ import re
 def get_first_search_url_from_melonbooks(query):
     """
     Melonbooksで指定のクエリを検索し、最初の結果のURLを返す。
+    複数の結果からクエリとの一致度が高いものを優先する。
     """
     # クエリをURLエンコード
     encoded_query = urllib.parse.quote(query)
@@ -26,29 +27,37 @@ def get_first_search_url_from_melonbooks(query):
         # HTMLを解析
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 最初の商品リンクを探す（detail.phpを含むhref）
-        # Melonbooksの構造を仮定：商品リスト内のaタグでdetail.phpを含むもの
-        first_link_elem = soup.find('a', href=re.compile(r'detail\.php\?product_id='))
+        # 複数の商品リンクを取得
+        link_elems = soup.find_all('a', href=re.compile(r'detail\.php\?product_id='))
         
-        if first_link_elem and first_link_elem.get('href'):
-            href = first_link_elem['href']
-            # 相対URLの場合、ベースURLを追加
-            if href.startswith('/'):
-                full_url = f"https://www.melonbooks.co.jp{href}"
-            else:
-                full_url = href
-            return full_url
-        else:
-            return "N/A1"
+        if not link_elems:
+            return "N/A"
+        
+        # クエリと一致するものを探す（小文字で比較）
+        query_lower = query.lower()
+        
+        # 部分一致を探す
+        for link_elem in link_elems:
+            title = link_elem.get_text(strip=True).lower()
+            if query_lower in title or any(word in title for word in query_lower.split()):
+                href = link_elem['href']
+                if href.startswith('/'):
+                    return f"https://www.melonbooks.co.jp{href}"
+                else:
+                    return href
+        
+        # 部分一致がなければ N/A を返す
+        return "N/A"
     
     except requests.RequestException as e:
-        return "N/A2"
+        return "N/A"
     except Exception as e:
-        return "N/A3"
+        return "N/A"
     
 def get_first_search_url_from_dlsite(query):
     """
-    Melonbooksで指定のクエリを検索し、最初の結果のURLを返す。
+    DLsiteで指定のクエリを検索し、最初の結果のURLを返す。
+    複数の結果からクエリとの一致度が高いものを優先する。
     """
     # クエリをURLエンコード
     encoded_query = urllib.parse.quote(query)
@@ -69,19 +78,24 @@ def get_first_search_url_from_dlsite(query):
         # HTMLを解析
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 最初の商品リンクを探す（detail.phpを含むhref）
-        # Melonbooksの構造を仮定：商品リスト内のaタグでdetail.phpを含むもの
-        first_link_elem = soup.find('a', href=re.compile(r'https://www.dlsite.com/maniax/work/=/product_id/'))
-        if first_link_elem and first_link_elem.get('href'):
-            href = first_link_elem['href']
-            # 相対URLの場合、ベースURLを追加
-            if href.startswith('/'):
-                full_url = f"https://www.dlsite.com/maniax/work/=/product_id/{href}"
-            else:
-                full_url = href
-            return full_url
-        else:
+        # 複数の商品リンクを取得
+        link_elems = soup.find_all('a', href=re.compile(r'https://www.dlsite.com/maniax/work/=/product_id/'))
+        
+        if not link_elems:
             return "N/A"
+        
+        # クエリと一致するものを探す（小文字で比較）
+        query_lower = query.lower()
+        
+        # 完全一致を探す
+        for link_elem in link_elems:
+            title = link_elem.get_text(strip=True).lower()
+            if query_lower in title:
+                href = link_elem['href']
+                return href if not href.startswith('/') else f"https://www.dlsite.com{href}"
+        
+        # 完全一致がなければ N/A を返す
+        return "N/A"
     
     except requests.RequestException as e:
         return "N/A"
@@ -91,12 +105,13 @@ def get_first_search_url_from_dlsite(query):
 def get_first_search_url_from_toranoana(query):
     """
     Toranoanaで指定のクエリを検索し、最初の結果のURLを返す。
+    複数の結果からクエリとの一致度が高いものを優先する。
     """
     # クエリをURLエンコード
     encoded_query = urllib.parse.quote(query)
     
     # 検索URLを構築
-    search_url = f"https://ec.toranoana.jp/tora_r/ec/app/catalog/list?searchWord={encoded_query}&_gl=1*12n0h8j*_gcl_au*MTczNDk4NDQxNi4xNzU3ODA2NTQ1"
+    search_url = f"https://ec.toranoana.jp/tora_r/ec/app/catalog/list?searchWord={encoded_query}"
     
     # ヘッダーを設定（ボット検知回避）
     headers = {
@@ -111,19 +126,25 @@ def get_first_search_url_from_toranoana(query):
         # HTMLを解析
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 最初の商品リンクを探す（detail.phpを含むhref）
-        # Melonbooksの構造を仮定：商品リスト内のaタグでdetail.phpを含むもの
-        first_link_elem = soup.find('a', href=re.compile(r'https://ec.toranoana.jp/tora_r/ec/item/'))
-        if first_link_elem and first_link_elem.get('href'):
-            href = first_link_elem['href']
-            # 相対URLの場合、ベースURLを追加
-            if href.startswith('/'):
-                full_url = f"https://ec.toranoana.jp/tora_r/ec/item/{href}"
-            else:
-                full_url = href
-            return full_url
-        else:
+        # 複数の商品リンクを取得
+        link_elems = soup.find_all('a', href=re.compile(r'https://ec.toranoana.jp/tora_r/ec/item/'))
+        
+        if not link_elems:
+            # メイン検索が失敗した場合は女子部で試す
             return get_first_search_url_from_toranoana_joshi(query)
+        
+        # クエリと一致するものを探す（小文字で比較）
+        query_lower = query.lower()
+        
+        # 部分一致を探す
+        for link_elem in link_elems:
+            title = link_elem.get_text(strip=True).lower()
+            if query_lower in title or any(word in title for word in query_lower.split()):
+                href = link_elem['href']
+                return href if not href.startswith('/') else f"https://ec.toranoana.jp/tora_r/ec/item/{href}"
+        
+        # 部分一致がなければ女子部で試す
+        return get_first_search_url_from_toranoana_joshi(query)
         
     except requests.RequestException as e:
         return get_first_search_url_from_toranoana_joshi(query)
@@ -133,12 +154,13 @@ def get_first_search_url_from_toranoana(query):
 def get_first_search_url_from_toranoana_joshi(query):
     """
     Toranoana(女子部)で指定のクエリを検索し、最初の結果のURLを返す。
+    複数の結果からクエリとの一致度が高いものを優先する。
     """
     # クエリをURLエンコード
     encoded_query = urllib.parse.quote(query)
     
     # 検索URLを構築
-    search_url = f"https://ec.toranoana.jp/joshi_r/ec/app/catalog/list?searchWord={encoded_query}&_gl=1*12n0h8j*_gcl_au*MTczNDk4NDQxNi4xNzU3ODA2NTQ1"
+    search_url = f"https://ec.toranoana.jp/joshi_r/ec/app/catalog/list?searchWord={encoded_query}"
     
     # ヘッダーを設定（ボット検知回避）
     headers = {
@@ -153,24 +175,29 @@ def get_first_search_url_from_toranoana_joshi(query):
         # HTMLを解析
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 最初の商品リンクを探す（detail.phpを含むhref）
-        # Melonbooksの構造を仮定：商品リスト内のaタグでdetail.phpを含むもの
-        first_link_elem = soup.find('a', href=re.compile(r'https://ec.toranoana.jp/joshi_r/ec/item/'))
-        if first_link_elem and first_link_elem.get('href'):
-            href = first_link_elem['href']
-            # 相対URLの場合、ベースURLを追加
-            if href.startswith('/'):
-                full_url = f"https://ec.toranoana.jp/joshi_r/ec/item/{href}"
-            else:
-                full_url = href
-            return full_url
-        else:
-            return "N/A1"
+        # 複数の商品リンクを取得
+        link_elems = soup.find_all('a', href=re.compile(r'https://ec.toranoana.jp/joshi_r/ec/item/'))
+        
+        if not link_elems:
+            return "N/A"
+        
+        # クエリと一致するものを探す（小文字で比較）
+        query_lower = query.lower()
+        
+        # 部分一致を探す
+        for link_elem in link_elems:
+            title = link_elem.get_text(strip=True).lower()
+            if query_lower in title or any(word in title for word in query_lower.split()):
+                href = link_elem['href']
+                return href if not href.startswith('/') else f"https://ec.toranoana.jp/joshi_r/ec/item/{href}"
+        
+        # 部分一致がなければ N/A を返す
+        return "N/A"
         
     except requests.RequestException as e:
-        return "N/A2"
+        return "N/A"
     except Exception as e:
-        return "N/A3"
+        return "N/A"
 
 
 def get_first_search_url_from_booth(query):
@@ -181,7 +208,7 @@ def get_first_search_url_from_booth(query):
     encoded_query = urllib.parse.quote(query)
 
     # Boothの検索URL（adult を含め、在庫有りに絞る）
-    search_url = f"https://booth.pm/ja/search/{encoded_query}?adult=include&in_stock=true"
+    search_url = f"https://booth.pm/ja/search/{encoded_query}?adult=include"
 
     # ヘッダーを設定（ボット検知回避）
     headers = {
@@ -286,15 +313,26 @@ def get_first_search_url_from_booth(query):
                     except requests.RequestException:
                         return "N/A"
 
-        # 年齢確認通過後または最初から確認がない場合、結果の最初のリンクを取得する
+        # 年齢確認通過後または最初から確認がない場合、結果の複数のリンクを取得する
         # data-tracking 属性の a タグ優先、なければ /ja/items/ を含む href を探す
-        first_link_elem = soup.find('a', attrs={'data-tracking': 'click_item'}) or soup.find('a', href=re.compile(r'/ja/items/|booth\.pm/.*/items/'))
-        if first_link_elem and first_link_elem.get('href'):
-            href = first_link_elem['href']
-            full_url = urllib.parse.urljoin('https://booth.pm', href)
-            return full_url
-        else:
+        link_elems = soup.find_all('a', attrs={'data-tracking': 'click_item'}) or soup.find_all('a', href=re.compile(r'/ja/items/|booth\.pm/.*/items/'))
+        
+        if not link_elems:
             return "N/A"
+        
+        # クエリと一致するものを探す（小文字で比較）
+        query_lower = query.lower()
+        
+        # 部分一致を探す
+        for link_elem in link_elems:
+            title = link_elem.get_text(strip=True).lower()
+            if query_lower in title or any(word in title for word in query_lower.split()):
+                href = link_elem['href']
+                full_url = urllib.parse.urljoin('https://booth.pm', href)
+                return full_url
+        
+        # 部分一致がなければ N/A を返す
+        return "N/A"
 
     except requests.RequestException:
         return "N/A"
@@ -343,8 +381,10 @@ def get_first_search_url_from_fanza(query):
                 except requests.RequestException:
                     return "N/A"
 
-        # Now find the first product link - prefer links under /dc/doujin/ to avoid unrelated '/detail/' help pages
-        first_link = None
+        # Now find the product link - prefer links with titles matching the query
+        query_lower = query.lower()
+        matched_links = []
+        
         for a in soup.find_all('a', href=True):
             href = a['href']
             # convert to absolute
@@ -353,16 +393,21 @@ def get_first_search_url_from_fanza(query):
             if 'dmm.co.jp' not in (p.netloc or '') and p.netloc != '':
                 # skip external domains (help.dmm.co.jp etc.)
                 continue
-            if p.path.startswith('/dc/doujin/'):
-                # prefer detailed product links with 'detail' in path
-                if '/detail/' in p.path:
-                    first_link = full_href
-                    break
-                # otherwise keep first /dc/doujin/ as fallback
-                if first_link is None:
-                    first_link = full_href
-        if first_link:
-            return first_link
+            if p.path.startswith('/dc/doujin/') and '/detail/' in p.path:
+                # collect all detailed product links
+                title = a.get_text(strip=True).lower()
+                matched_links.append((full_href, title))
+        
+        if not matched_links:
+            return "N/A"
+        
+        # Try to find exact or partial match first
+        query_lower = query.lower()
+        for link, title in matched_links:
+            if query_lower in title or any(word in title for word in query_lower.split()):
+                return link
+        
+        # 部分一致がなければ N/A を返す
         return "N/A"
     except requests.RequestException:
         return "N/A"
@@ -373,12 +418,14 @@ def get_first_search_url_from_fanza(query):
 def get_first_search_url_from_alicebooks(query):
     """
     AliceBooks (alice-books.com) で指定のクエリを検索し、最初の結果のURLを返す。
+    複数の結果からクエリとの一致度が高いものを優先する。
+    品切れ商品も含める。
     """
     # クエリをURLエンコード
     encoded_query = urllib.parse.quote(query)
     
-    # 検索URLを構築
-    search_url = f"https://alice-books.com/item/list/all?keyword={encoded_query}&on_sale=1"
+    # 検索URLを構築（on_sale パラメータなし = 品切れ含む）
+    search_url = f"https://alice-books.com/item/list/all?keyword={encoded_query}"
     
     # ヘッダーを設定（ボット検知回避）
     headers = {
@@ -390,23 +437,41 @@ def get_first_search_url_from_alicebooks(query):
         response = requests.get(search_url, headers=headers, timeout=10)
         response.raise_for_status()
         
-        # HTMLを解析
+        # HTMLを解析（エンコーディングを明示的に指定）
+        response.encoding = 'utf-8'
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 最初の商品リンクを探す
-        # Alice Books の商品リンク形式: /item/show/XXXX-YY
-        first_link_elem = soup.find('a', href=re.compile(r'/item/show/\d+'))
+        # 商品ボックスを取得（item_box は各商品のコンテナ）
+        item_boxes = soup.find_all('div', class_='item_box')
         
-        if first_link_elem and first_link_elem.get('href'):
-            href = first_link_elem['href']
-            # 相対URLの場合、ベースURLを追加
-            if href.startswith('/'):
-                full_url = f"https://alice-books.com{href}"
-            else:
-                full_url = href
-            return full_url
-        else:
+        if not item_boxes:
             return "N/A"
+        
+        # クエリと一致するものを探す（小文字で比較）
+        query_lower = query.lower()
+        
+        # 部分一致を探す
+        for item_box in item_boxes:
+            # item_name の dt 要素から title を取得
+            item_name_elem = item_box.find('dt', class_='item_name')
+            if not item_name_elem:
+                continue
+            
+            # dt の中の a タグから href と text を取得
+            link_elem = item_name_elem.find('a')
+            if not link_elem:
+                continue
+            
+            title = link_elem.get_text(strip=True).lower()
+            if query_lower in title or any(word in title for word in query_lower.split()):
+                href = link_elem['href']
+                if href.startswith('/'):
+                    return f"https://alice-books.com{href}"
+                else:
+                    return href
+        
+        # 部分一致がなければ N/A を返す
+        return "N/A"
     
     except requests.RequestException as e:
         return "N/A"
