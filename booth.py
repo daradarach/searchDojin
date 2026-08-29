@@ -4,6 +4,60 @@ import urllib.parse
 import re
 
 
+def _normalize_booth_title(raw_title):
+    """Normalize Booth title strings by stripping site noise and common separators."""
+    if not raw_title:
+        return None
+    title = raw_title.strip()
+    if not title:
+        return None
+
+    title = re.sub(r'\s*\r?\n\s*', ' ', title)
+    title = re.sub(r'\s*[|｜]\s*', ' | ', title)
+    title = re.sub(r'\s*[-–—]\s*BOOTH\s*$', '', title, flags=re.I)
+    title = re.sub(r'\s*[|｜]\s*BOOTH\s*$', '', title, flags=re.I)
+    title = re.sub(r'\s*BOOTH\s*$', '', title, flags=re.I)
+    title = re.sub(r'\s*[-–—]\s*pixiv\s*$', '', title, flags=re.I)
+    title = re.sub(r'\s*\|\s*$', '', title)
+    title = re.sub(r'\s+', ' ', title)
+    title = title.strip()
+
+    if not title:
+        return None
+
+    parts = [p.strip() for p in re.split(r'\s*\|\s*', title)]
+    cleaned = []
+    for part in parts:
+        part = re.sub(r'\s*[-–—]\s*BOOTH\s*$', '', part, flags=re.I)
+        part = re.sub(r'\s*BOOTH\s*$', '', part, flags=re.I)
+        if part and re.fullmatch(r'(?i)(booth|pixiv|shop|販売)', part) is None:
+            cleaned.append(part)
+    if cleaned:
+        title = cleaned[0]
+    title = title.strip()
+    return title or None
+
+
+def _split_booth_title_parts(raw_title):
+    """Split a Booth title text by common separators while preserving the title part."""
+    if not raw_title:
+        return []
+
+    raw_candidates = []
+    for sep in [' - ', '｜', '|', ' / ', '／']:
+        parts = [p.strip() for p in raw_title.split(sep)]
+        if len(parts) > 1:
+            raw_candidates.extend([p for p in parts if p])
+
+    candidates = raw_candidates if raw_candidates else [raw_title]
+    seen = []
+    for part in candidates:
+        norm = _normalize_booth_title(part)
+        if norm and norm not in seen:
+            seen.append(norm)
+    return seen
+
+
 def extract_product_info(product_url):
     """Extract basic product metadata from a Booth product page.
 
@@ -48,16 +102,20 @@ def extract_product_info(product_url):
     og_title = soup.find('meta', attrs={'property': 'og:title'})
     if og_title and og_title.get('content'):
         content = og_title['content'].strip()
-        # split by ' - ' and take first as title, second as circle if present
-        parts = [p.strip() for p in content.split(' - ')]
-        if len(parts) >= 1:
+        parts = _split_booth_title_parts(content)
+        if parts:
             title = parts[0]
         if len(parts) >= 2:
-            # last part often is 'BOOTH', so if there are >=3, take the middle as circle
-            if parts[-1].upper() == 'BOOTH' and len(parts) >= 3:
-                circle = parts[1]
-            elif parts[-1].upper() != 'BOOTH' and len(parts) >= 2:
-                circle = parts[1]
+            candidate_circle = parts[1]
+            if not re.fullmatch(r'(?i)(booth|pixiv|shop|販売)', candidate_circle):
+                circle = candidate_circle
+        elif '|' in content or '｜' in content:
+            split_parts = [p.strip() for p in re.split(r'\s*[|｜]\s*', content)]
+            split_parts = [p for p in split_parts if p]
+            if len(split_parts) >= 2:
+                circle = split_parts[1]
+                circle = re.sub(r'\s*[-–—]\s*BOOTH\s*$', '', circle, flags=re.I)
+                circle = re.sub(r'\s*BOOTH\s*$', '', circle, flags=re.I)
 
     # Fallback: try <h1>
     if not title:
@@ -65,7 +123,10 @@ def extract_product_info(product_url):
         if h1:
             t = h1.get_text(strip=True)
             if t:
-                title = t
+                title = _normalize_booth_title(t)
+
+    if title:
+        title = _normalize_booth_title(title)
 
     # Try to find author/circle by anchors pointing to /users/ or /makers/
     for a in soup.find_all('a'):
