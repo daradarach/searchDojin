@@ -75,6 +75,16 @@ def extract_product_info(product_url):
 
     soup = BeautifulSoup(text, 'html.parser')
 
+    def _looks_like_site_brand(value):
+        if not value:
+            return False
+        v = value.strip()
+        if not v:
+            return False
+        if 'FANZA' in v or 'DMM' in v or '年齢認証' in v:
+            return True
+        return False
+
     title = None
     circle = None
     author = None
@@ -105,33 +115,44 @@ def extract_product_info(product_url):
     except Exception:
         pass
 
-    # 2) Try extracting raw <title> bytes from the original content first - this reliably contains the product name
-    try:
-        m = re.search(rb'<title>(.*?)</title>', resp.content, flags=re.I | re.S)
-        if m:
-            raw = m.group(1)
-            try:
-                raw_txt = raw.decode('utf-8', errors='replace')
-            except Exception:
-                raw_txt = raw.decode('cp932', errors='replace')
-            # prefer parenthetical title: "FullName (Title) - FANZA"
-            p = re.search(r'[（\(]([^）\)]{1,200})[）\)]', raw_txt)
-            if p:
-                title = p.group(1).strip()
-            else:
-                title = re.sub(r'\s*[\-|｜].*FANZA.*$', '', raw_txt).strip()
-    except Exception:
-        pass
+    # 2) Prefer the actual product heading over the site-brand title tag.
+    h1 = soup.find('h1')
+    if h1 and h1.get_text(strip=True):
+        h1_txt = h1.get_text(strip=True)
+        if not _looks_like_site_brand(h1_txt):
+            title = h1_txt
 
-    # 3) Try meta og:title if still missing
+    # 3) Extract raw <title> bytes as a fallback when there is no useful h1.
+    if not title:
+        try:
+            m = re.search(rb'<title>(.*?)</title>', resp.content, flags=re.I | re.S)
+            if m:
+                raw = m.group(1)
+                try:
+                    raw_txt = raw.decode('utf-8', errors='replace')
+                except Exception:
+                    raw_txt = raw.decode('cp932', errors='replace')
+                # prefer parenthetical title: "FullName (Title) - FANZA"
+                p = re.search(r'[（\(]([^）\)]{1,200})[）\)]', raw_txt)
+                if p:
+                    candidate = p.group(1).strip()
+                else:
+                    candidate = re.sub(r'\s*[\-|｜].*FANZA.*$', '', raw_txt).strip()
+                if candidate and not _looks_like_site_brand(candidate):
+                    title = candidate
+        except Exception:
+            pass
+
+    # 4) Try meta og:title if still missing
     if not title:
         og = soup.find('meta', property='og:title')
         if og and og.get('content'):
-            title = og['content'].strip()
+            og_title = og['content'].strip()
+            if not _looks_like_site_brand(og_title):
+                title = og_title
 
-    # 3) Try h1 or title tag
+    # 5) Final fallback: page h1/title tag if they are still useful
     if not title:
-        h1 = soup.find('h1')
         if h1 and h1.get_text(strip=True):
             title = h1.get_text(strip=True)
     if not title:
