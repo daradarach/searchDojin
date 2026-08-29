@@ -87,6 +87,59 @@ def _find_booth_url_with_fallback(title, circle, author):
     return None
 
 
+def _normalize_title_for_similarity(title):
+    """Normalize a title for robust similarity comparison."""
+    if not title:
+        return ''
+    text = re.sub(r'[^\w\u3040-\u30ff\u4e00-\u9fff]+', '', title).lower()
+    return text.strip()
+
+
+def _is_title_similar(candidate_title, reference_title, threshold=0.90):
+    """Return True when two titles are sufficiently similar."""
+    if not candidate_title or not reference_title:
+        return True
+    c = _normalize_title_for_similarity(candidate_title)
+    r = _normalize_title_for_similarity(reference_title)
+    if not c or not r:
+        return True
+    if c == r:
+        return True
+    if c in r or r in c:
+        return True
+    if len(c) <= 2 or len(r) <= 2:
+        return False
+    shared = 0
+    for ch in set(c):
+        if ch in r:
+            shared += 1
+    ratio = shared / max(len(set(c)), len(set(r)))
+    return ratio >= threshold
+
+
+def _filter_site_urls_by_title_similarity(site_urls, site_infos, reference_title, preserved_site=None):
+    """Drop candidate URLs whose extracted title looks unrelated to the reference title."""
+    if not reference_title:
+        return site_urls
+    filtered = {}
+    for site_name, url in site_urls.items():
+        if not url:
+            continue
+        if preserved_site and site_name == preserved_site:
+            filtered[site_name] = url
+            continue
+        info = site_infos.get(site_name)
+        if not info:
+            filtered[site_name] = url
+            continue
+        candidate_title = info.get('作品名') or ''
+        if _is_title_similar(candidate_title, reference_title):
+            filtered[site_name] = url
+        else:
+            filtered[site_name] = ''
+    return filtered
+
+
 def _detect_site_from_url(url):
     """Detect a supported site from a URL for direct-input handling."""
     if not url or not isinstance(url, str):
@@ -217,7 +270,7 @@ def main(argv=None):
 
     file_path = argv[0]
 
-    if 'https://' in file_path:
+    if file_path.startswith('http'):
         try:
             info, cleaned = execute_url(file_path)
             detected_site = _detect_site_from_url(file_path)
@@ -227,7 +280,9 @@ def main(argv=None):
                 site_urls[detected_site] = _get_direct_url_output_value(detected_site, file_path, cleaned)
 
             site_infos = {k: _fetch_site_info(k, u) for k, u in site_urls.items() if u}
-            picked = _pick_metadata(site_infos, info)
+            site_urls = _filter_site_urls_by_title_similarity(site_urls, site_infos, info.get('作品名'), preserved_site=detected_site)
+            filtered_site_infos = {k: site_infos[k] for k in site_urls if site_urls.get(k)}
+            picked = _pick_metadata(filtered_site_infos, info)
             circle = picked['サークル名'] or info.get('サークル名') or ''
             author = picked['作家名'] or info.get('作家名') or ''
             title = picked['作品名'] or info.get('作品名') or ''
@@ -248,95 +303,108 @@ def main(argv=None):
         sys.exit(0)
 
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                value = line.strip()
-                if not value:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        except UnicodeDecodeError:
+            with open(file_path, 'r', encoding='shift_jis', errors='strict') as f:
+                lines = f.readlines()
+
+        for line in lines:
+            value = line.strip()
+            if not value:
+                continue
+            detected_site = None
+            if value.startswith('http'):
+                target_url = value
+                detected_site = _detect_site_from_url(value)
+                results = {detected_site: value} if detected_site else {'direct': value}
+                primary_name = detected_site or 'direct'
+                primary = value
+                found_source = primary_name
+                found_list = f"{primary_name}:{value}"
+            else:
+                search_fns = [
+                    ('melonbooks', get_first_search_url_from_melonbooks),
+                    ('toranoana', get_first_search_url_from_toranoana),
+                    ('dlsite', get_first_search_url_from_dlsite),
+                    ('booth', get_first_search_url_from_booth),
+                    ('alicebooks', get_first_search_url_from_alicebooks),
+                ]
+                results = {}
+                for name, fn in search_fns:
+                    try:
+                        candidate = fn(value)
+                    except Exception:
+                        candidate = None
+                    if candidate and isinstance(candidate, str) and candidate.startswith('http'):
+                        results[name] = candidate
+
+                if not results:
+                    try:
+                        fz = get_first_search_url_from_fanza(value)
+                        if fz and isinstance(fz, str) and fz.startswith('http'):
+                            results['fanza'] = fz
+                    except Exception:
+                        pass
+                if not results:
+                    print(f"Warning: no search result for query: {_safe_console_str(value)}", file=sys.stderr)
+                    print(f"\t\t{_safe_console_str(value)}\t\t\t\t")
                     continue
-                detected_site = None
-                if value.startswith('http'):
-                    target_url = value
-                    detected_site = _detect_site_from_url(value)
                 else:
-                    search_fns = [
-                        ('melonbooks', get_first_search_url_from_melonbooks),
-                        ('toranoana', get_first_search_url_from_toranoana),
-                        ('dlsite', get_first_search_url_from_dlsite),
-                        ('booth', get_first_search_url_from_booth),
-                        ('alicebooks', get_first_search_url_from_alicebooks),
-                    ]
-                    results = {}
-                    for name, fn in search_fns:
-                        try:
-                            candidate = fn(value)
-                        except Exception:
-                            candidate = None
-                        if candidate and isinstance(candidate, str) and candidate.startswith('http'):
-                            results[name] = candidate
+                    preferred = ['melonbooks', 'toranoana', 'dlsite', 'booth', 'alicebooks']
+                    primary = None
+                    for p in preferred:
+                        if p in results:
+                            primary = results[p]
+                            primary_name = p
+                            break
+                    if primary is None:
+                        primary_name, primary = next(iter(results.items()))
 
-                    if not results:
-                        try:
-                            fz = get_first_search_url_from_fanza(value)
-                            if fz and isinstance(fz, str) and fz.startswith('http'):
-                                results['fanza'] = fz
-                        except Exception:
-                            pass
-                    if not results:
-                        print(f"Warning: no search result for query: {_safe_console_str(value)}", file=sys.stderr)
-                        print(f"\t\t{_safe_console_str(value)}\t\t\t\t")
-                        continue
-                    else:
-                        preferred = ['dlsite', 'booth', 'melonbooks', 'toranoana', 'alicebooks']
-                        primary = None
-                        for p in preferred:
-                            if p in results:
-                                primary = results[p]
-                                primary_name = p
-                                break
-                        if primary is None:
-                            primary_name, primary = next(iter(results.items()))
+                    found_list = ', '.join([f"{k}:{v}" for k, v in results.items()])
+                    print(f"Found URLs for query: {_safe_console_str(value)} -> {found_list}", file=sys.stderr)
 
-                        found_list = ', '.join([f"{k}:{v}" for k, v in results.items()])
-                        print(f"Found URLs for query: {_safe_console_str(value)} -> {found_list}", file=sys.stderr)
+                    target_url = primary
+                    found_source = primary_name
 
-                        target_url = primary
-                        found_source = primary_name
+            try:
+                if 'found_source' in locals() and found_source == 'fanza':
+                    try:
+                        info = extract_product_info_fanza(target_url)
+                        cleaned = target_url
+                    except Exception:
+                        raise ValueError(f"Unsupported or invalid URL: {target_url}")
+                else:
+                    info, cleaned = execute_url(target_url)
 
-                try:
-                    if 'found_source' in locals() and found_source == 'fanza':
-                        try:
-                            info = extract_product_info_fanza(target_url)
-                            cleaned = target_url
-                        except Exception:
-                            raise ValueError(f"Unsupported or invalid URL: {target_url}")
-                    else:
-                        info, cleaned = execute_url(target_url)
+                title_q = info.get('作品名') or ''
+                site_urls = _build_site_url_candidates(title_q, info, results=results if 'results' in locals() else None, excluded_site=detected_site)
+                if detected_site:
+                    site_urls[detected_site] = _get_direct_url_output_value(detected_site, target_url, cleaned)
 
-                    title_q = info.get('作品名') or ''
-                    site_urls = _build_site_url_candidates(title_q, info, results=results if 'results' in locals() else None, excluded_site=detected_site)
-                    if detected_site:
-                        site_urls[detected_site] = _get_direct_url_output_value(detected_site, target_url, cleaned)
+                site_infos = {k: _fetch_site_info(k, u) for k, u in site_urls.items() if u}
+                site_urls = _filter_site_urls_by_title_similarity(site_urls, site_infos, info.get('作品名'), preserved_site=detected_site)
+                filtered_site_infos = {k: site_infos[k] for k in site_urls if site_urls.get(k)}
+                picked = _pick_metadata(filtered_site_infos, info)
+                circle = picked['サークル名'] or info.get('サークル名') or ''
+                author = picked['作家名'] or info.get('作家名') or ''
+                title = picked['作品名'] or info.get('作品名') or ''
+                release = picked['発売日'] or info.get('発売日') or ''
+                event = picked['イベント名'] or info.get('イベント名') or ''
+                release_norm = _normalize_date_to_ymd(release)
 
-                    site_infos = {k: _fetch_site_info(k, u) for k, u in site_urls.items() if u}
-                    picked = _pick_metadata(site_infos, info)
-                    circle = picked['サークル名'] or info.get('サークル名') or ''
-                    author = picked['作家名'] or info.get('作家名') or ''
-                    title = picked['作品名'] or info.get('作品名') or ''
-                    release = picked['発売日'] or info.get('発売日') or ''
-                    event = picked['イベント名'] or info.get('イベント名') or ''
-                    release_norm = _normalize_date_to_ymd(release)
+                dlsiteurl = site_urls.get('dlsite') or ''
+                fanza = site_urls.get('fanza') or ''
+                boothurl = site_urls.get('booth') or ''
+                toraurl = site_urls.get('toranoana') or ''
+                melonurl = site_urls.get('melonbooks') or ''
+                alicebooksurl = site_urls.get('alicebooks') or ''
 
-                    dlsiteurl = site_urls.get('dlsite') or ''
-                    fanza = site_urls.get('fanza') or ''
-                    boothurl = site_urls.get('booth') or ''
-                    toraurl = site_urls.get('toranoana') or ''
-                    melonurl = site_urls.get('melonbooks') or ''
-                    alicebooksurl = site_urls.get('alicebooks') or ''
+                print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}\t{alicebooksurl}")
 
-                    print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}\t{alicebooksurl}\t{cleaned}")
-
-                except Exception as e:
-                    print(f"Error processing {_safe_console_str(target_url)}: {e}", file=sys.stderr)
+            except Exception as e:
+                print(f"Error processing {_safe_console_str(target_url)}: {e}", file=sys.stderr)
     except FileNotFoundError:
         print(f"File not found: {file_path}", file=sys.stderr)
         sys.exit(1)
