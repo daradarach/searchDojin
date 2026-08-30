@@ -7,17 +7,24 @@ from urllib.parse import urlparse, parse_qs, urlunparse
 
 def clean_url(url):
     """
-    URLからsrsltidパラメータを除去する。
+    URLから不要なMelonbooksパスとsrsltidパラメータを除去する。
+    例: /fromagee/detail/detail.php?product_id=... -> /detail/detail.php?product_id=...
     """
     parsed = urlparse(url)
+
+    if parsed.path:
+        segments = [seg for seg in parsed.path.split('/') if seg]
+        if segments and segments[0] == 'fromagee':
+            segments = segments[1:]
+            parsed = parsed._replace(path='/' + '/'.join(segments) if segments else '/')
+
     query_params = parse_qs(parsed.query)
     if 'srsltid' in query_params:
         del query_params['srsltid']
-        # 再構築
         new_query = '&'.join([f"{k}={v[0]}" for k, v in query_params.items()])
         parsed = parsed._replace(query=new_query)
-        return urlunparse(parsed)
-    return url
+
+    return urlunparse(parsed)
     
 def extract_product_info(product_url):
 
