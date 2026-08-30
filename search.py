@@ -164,11 +164,23 @@ def _detect_site_from_url(url):
     return None
 
 
+def _normalize_url_value(value):
+    """Return a usable URL or empty string; ignore placeholder values such as N/A."""
+    if not value or not isinstance(value, str):
+        return ''
+    trimmed = value.strip()
+    if not trimmed or trimmed.upper() == 'N/A':
+        return ''
+    if trimmed.startswith('http'):
+        return trimmed
+    return ''
+
+
 def _get_direct_url_output_value(site_name, original_url, cleaned_url):
     """Return the value to place in the per-site URL column for a direct URL input."""
     if site_name == 'melonbooks':
-        return cleaned_url or original_url
-    return original_url
+        return _normalize_url_value(cleaned_url) or _normalize_url_value(original_url)
+    return _normalize_url_value(original_url)
 
 
 def _build_site_url_candidates(title_q, info, results=None, excluded_site=None):
@@ -177,14 +189,16 @@ def _build_site_url_candidates(title_q, info, results=None, excluded_site=None):
 
     if isinstance(results, dict) and results:
         for key in site_urls:
-            site_urls[key] = results.get(key) or ''
+            value = results.get(key)
+            site_urls[key] = _normalize_url_value(value)
         return site_urls
 
     def set_if_allowed(site_key, value):
+        normalized = _normalize_url_value(value)
         if excluded_site and site_key == excluded_site:
             return
-        if value:
-            site_urls[site_key] = value
+        if normalized:
+            site_urls[site_key] = normalized
 
     if not excluded_site or excluded_site != 'dlsite':
         set_if_allowed('dlsite', get_first_search_url_from_dlsite(title_q))
@@ -294,12 +308,12 @@ def main(argv=None):
             event = picked['イベント名'] or info.get('イベント名') or ''
             release_norm = _normalize_date_to_ymd(release)
 
-            dlsiteurl = site_urls.get('dlsite') or ''
-            fanza = site_urls.get('fanza') or ''
-            boothurl = site_urls.get('booth') or ''
-            toraurl = site_urls.get('toranoana') or ''
-            melonurl = site_urls.get('melonbooks') or ''
-            alicebooksurl = site_urls.get('alicebooks') or ''
+            dlsiteurl = _normalize_url_value(site_urls.get('dlsite'))
+            fanza = _normalize_url_value(site_urls.get('fanza'))
+            boothurl = _normalize_url_value(site_urls.get('booth'))
+            toraurl = _normalize_url_value(site_urls.get('toranoana'))
+            melonurl = _normalize_url_value(site_urls.get('melonbooks'))
+            alicebooksurl = _normalize_url_value(site_urls.get('alicebooks'))
             print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}\t{alicebooksurl}\t{cleaned}")
         except Exception as e:
             print(f"Error processing {_safe_console_str(file_path)}: {e}", file=sys.stderr)
@@ -418,12 +432,12 @@ def main(argv=None):
                 event = picked['イベント名'] or info.get('イベント名') or ''
                 release_norm = _normalize_date_to_ymd(release)
 
-                dlsiteurl = site_urls.get('dlsite') or ''
-                fanza = site_urls.get('fanza') or ''
-                boothurl = site_urls.get('booth') or ''
-                toraurl = site_urls.get('toranoana') or ''
-                melonurl = site_urls.get('melonbooks') or ''
-                alicebooksurl = site_urls.get('alicebooks') or ''
+                dlsiteurl = _normalize_url_value(site_urls.get('dlsite'))
+                fanza = _normalize_url_value(site_urls.get('fanza'))
+                boothurl = _normalize_url_value(site_urls.get('booth'))
+                toraurl = _normalize_url_value(site_urls.get('toranoana'))
+                melonurl = _normalize_url_value(site_urls.get('melonbooks'))
+                alicebooksurl = _normalize_url_value(site_urls.get('alicebooks'))
 
                 print(f"{_safe_console_str(circle)}\t{_safe_console_str(author)}\t{_safe_console_str(title)}\t{_safe_console_str(release_norm)}\t{_safe_console_str(event)}\t{dlsiteurl}\t{fanza}\t{boothurl}\t{toraurl}\t{melonurl}\t{alicebooksurl}")
 
