@@ -95,26 +95,30 @@ def _normalize_title_for_similarity(title):
     return text.strip()
 
 
-def _is_title_similar(candidate_title, reference_title, threshold=0.90):
-    """Return True when two titles are sufficiently similar."""
+def _title_similarity_score(candidate_title, reference_title):
+    """Return a 0..1 similarity score for two titles."""
     if not candidate_title or not reference_title:
-        return True
+        return 1.0
     c = _normalize_title_for_similarity(candidate_title)
     r = _normalize_title_for_similarity(reference_title)
     if not c or not r:
-        return True
+        return 1.0
     if c == r:
-        return True
+        return 1.0
     if c in r or r in c:
-        return True
+        return 1.0
     if len(c) <= 2 or len(r) <= 2:
-        return False
+        return 0.0
     shared = 0
     for ch in set(c):
         if ch in r:
             shared += 1
-    ratio = shared / max(len(set(c)), len(set(r)))
-    return ratio >= threshold
+    return shared / max(len(set(c)), len(set(r)))
+
+
+def _is_title_similar(candidate_title, reference_title, threshold=0.90):
+    """Return True when two titles are sufficiently similar."""
+    return _title_similarity_score(candidate_title, reference_title) >= threshold
 
 
 def _filter_site_urls_by_title_similarity(site_urls, site_infos, reference_title, preserved_site=None):
@@ -275,7 +279,7 @@ def main(argv=None):
             info, cleaned = execute_url(file_path)
             detected_site = _detect_site_from_url(file_path)
             title_q = info.get('作品名') or ''
-            site_urls = _build_site_url_candidates(title_q, info, results=None, excluded_site=detected_site)
+            site_urls = _build_site_url_candidates(title_q, info, results=None, excluded_site=None)
             if detected_site:
                 site_urls[detected_site] = _get_direct_url_output_value(detected_site, file_path, cleaned)
 
@@ -315,22 +319,22 @@ def main(argv=None):
             if not value:
                 continue
             detected_site = None
+            search_fns = [
+                ('melonbooks', get_first_search_url_from_melonbooks),
+                ('toranoana', get_first_search_url_from_toranoana),
+                ('dlsite', get_first_search_url_from_dlsite),
+                ('booth', get_first_search_url_from_booth),
+                ('alicebooks', get_first_search_url_from_alicebooks),
+            ]
             if value.startswith('http'):
                 target_url = value
                 detected_site = _detect_site_from_url(value)
-                results = {detected_site: value} if detected_site else {'direct': value}
+                results = {}
                 primary_name = detected_site or 'direct'
                 primary = value
                 found_source = primary_name
                 found_list = f"{primary_name}:{value}"
             else:
-                search_fns = [
-                    ('melonbooks', get_first_search_url_from_melonbooks),
-                    ('toranoana', get_first_search_url_from_toranoana),
-                    ('dlsite', get_first_search_url_from_dlsite),
-                    ('booth', get_first_search_url_from_booth),
-                    ('alicebooks', get_first_search_url_from_alicebooks),
-                ]
                 results = {}
                 for name, fn in search_fns:
                     try:
@@ -379,14 +383,34 @@ def main(argv=None):
                     info, cleaned = execute_url(target_url)
 
                 title_q = info.get('作品名') or ''
-                site_urls = _build_site_url_candidates(title_q, info, results=results if 'results' in locals() else None, excluded_site=detected_site)
+                if detected_site and not results:
+                    for name, fn in search_fns:
+                        if name == detected_site:
+                            continue
+                        try:
+                            candidate = fn(title_q)
+                        except Exception:
+                            candidate = None
+                        if candidate and isinstance(candidate, str) and candidate.startswith('http'):
+                            results[name] = candidate
+
+                site_urls = _build_site_url_candidates(title_q, info, results=(results if results else None), excluded_site=None)
                 if detected_site:
                     site_urls[detected_site] = _get_direct_url_output_value(detected_site, target_url, cleaned)
 
                 site_infos = {k: _fetch_site_info(k, u) for k, u in site_urls.items() if u}
                 site_urls = _filter_site_urls_by_title_similarity(site_urls, site_infos, info.get('作品名'), preserved_site=detected_site)
                 filtered_site_infos = {k: site_infos[k] for k in site_urls if site_urls.get(k)}
-                picked = _pick_metadata(filtered_site_infos, info)
+                if detected_site:
+                    picked = {
+                        'サークル名': info.get('サークル名'),
+                        '作家名': info.get('作家名'),
+                        '作品名': info.get('作品名'),
+                        '発売日': info.get('発売日'),
+                        'イベント名': info.get('イベント名'),
+                    }
+                else:
+                    picked = _pick_metadata(filtered_site_infos, info)
                 circle = picked['サークル名'] or info.get('サークル名') or ''
                 author = picked['作家名'] or info.get('作家名') or ''
                 title = picked['作品名'] or info.get('作品名') or ''
